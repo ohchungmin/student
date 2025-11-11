@@ -1,90 +1,100 @@
-﻿#define _CRT_SECURE_NO_WARNINGS
+// io.c : CSV/JSON/TXT 구현
+#define _CRT_SECURE_NO_WARNINGS
 #include "io.h"
 #include <stdio.h>
 #include <string.h>
 
-void clear_input_buffer(void) { int c; while ((c = getchar()) != '\n' && c != EOF) {} }
-
-int prompt_int(const char* msg, int min, int max) {
-    int v; char line[128];
-    while (1) {
-        printf("%s", msg);
-        if (!fgets(line, sizeof(line), stdin)) { printf("입력 오류.\n"); continue; }
-        if (sscanf(line, "%d", &v) == 1 && v >= min && v <= max) return v;
-        printf("유효한 정수(%d~%d)를 입력하세요.\n", min, max);
+int save_to_csv(const StudentStore* s, const char* path) {
+    FILE* fp = fopen(path, "w");
+    if (!fp) { printf("파일 열기 실패: %s\n", path); return -1; }
+    fprintf(fp, "id,name,kor,eng,math,deleted\n");
+    for (int i = 0;i < s->count;i++) {
+        const Student* p = &s->arr[i];
+        fprintf(fp, "%d,%s,%d,%d,%d,%d\n", p->id, p->name, p->kor, p->eng, p->math, p->deleted);
     }
+    fclose(fp);
+    return 0;
 }
 
-float prompt_float(const char* msg, float min, float max) {
-    float v; char line[128];
-    while (1) {
-        printf("%s", msg);
-        if (!fgets(line, sizeof(line), stdin)) { printf("입력 오류.\n"); continue; }
-        if (sscanf(line, "%f", &v) == 1 && v >= min && v <= max) return v;
-        printf("유효한 실수(%.2f~%.2f)를 입력하세요.\n", min, max);
-    }
-}
-
-void prompt_string(const char* msg, char* out, int out_size) {
-    size_t len;
-    while (1) {
-        printf("%s", msg);
-        if (!fgets(out, out_size, stdin)) { printf("입력 오류.\n"); continue; }
-        len = strlen(out); if (len > 0 && out[len - 1] == '\n') out[len - 1] = '\0';
-        if (out[0] == '\0') { printf("빈 문자열 불가.\n"); continue; }
-        return;
-    }
-}
-
-int prompt_yes_no(const char* msg) {
-    char buf[8]; printf("%s (Y/N): ", msg);
-    if (!fgets(buf, sizeof(buf), stdin)) return 0;
-    return (buf[0] == 'Y' || buf[0] == 'y') ? 1 : 0;
-}
-
-/* CSV 저장/불러오기 (6주차와 동일) */
-int save_csv(const char* path, const StudentStore* store) {
-    FILE* fp; size_t i;
-#if defined(_MSC_VER)
-    if (fopen_s(&fp, path, "w") != 0 || !fp) { printf("파일 열기 실패: %s\n", path); return 0; }
-#else
-    fp = fopen(path, "w"); if (!fp) { printf("파일 열기 실패: %s\n", path); return 0; }
-#endif
-    fprintf(fp, "id,name,subject_count,score1,score2,score3,score4,score5,average,rank\n");
-    for (i = 0;i < store->size;++i) {
-        const Student* st = &store->data[i];
-        fprintf(fp, "%d,%s,%d,%d,%d,%d,%d,%d,%.2f,%d\n",
-            st->id, st->name, st->subject_count,
-            st->scores[0], st->scores[1], st->scores[2], st->scores[3], st->scores[4],
-            st->average, st->rank);
-    }
-    fclose(fp); return 1;
-}
-
-int load_csv(const char* path, StudentStore* store) {
-    FILE* fp; char line[512];
-#if defined(_MSC_VER)
-    if (fopen_s(&fp, path, "r") != 0 || !fp) { printf("파일 열기 실패: %s\n", path); return 0; }
-#else
-    fp = fopen(path, "r"); if (!fp) { printf("파일 열기 실패: %s\n", path); return 0; }
-#endif
+int load_from_csv(StudentStore* s, const char* path) {
+    FILE* fp = fopen(path, "r");
+    if (!fp) { return 0; } // 파일 없으면 0으로 간주
+    // 초기화 후 읽기
+    s->count = 0;
+    char line[256];
+    // 헤더 스킵
     if (!fgets(line, sizeof(line), fp)) { fclose(fp); return 0; }
-    store->size = 0;
     while (fgets(line, sizeof(line), fp)) {
-        int id, sc1, sc2, sc3, sc4, sc5, cnt, rank; char name[MAX_NAME_LEN]; float avg;
-#if defined(_MSC_VER)
-        { int ok = sscanf_s(line, "%d,%49[^,],%d,%d,%d,%d,%d,%d,%f,%d",
-            &id, name, (unsigned)MAX_NAME_LEN, &cnt, &sc1, &sc2, &sc3, &sc4, &sc5, &avg, &rank);
-        if (ok == 10) {
-#else
-            { int ok = sscanf(line, "%d,%49[^,],%d,%d,%d,%d,%d,%d,%f,%d",
-                &id, name, &cnt, &sc1, &sc2, &sc3, &sc4, &sc5, &avg, &rank);
-            if (ok == 10) {
-#endif
-                int scores[MAX_SUBJECTS] = { sc1,sc2,sc3,sc4,sc5 };
-                add_student(store, id, name, scores, cnt);
-                /* avg/rank는 내부 규칙으로 재계산되므로 참고만 */
-            }}
+        Student x;
+        int id, kor, eng, math, del;
+        char name[NAME_LEN];
+        if (sscanf(line, "%d,%31[^,],%d,%d,%d,%d", &id, name, &kor, &eng, &math, &del) == 6) {
+            x.id = id; strncpy(x.name, name, NAME_LEN - 1); x.name[NAME_LEN - 1] = '\0';
+            x.kor = kor; x.eng = eng; x.math = math; x.deleted = del;
+            // 총점/평균/학점은 가중치 재계산 필요. 여기선 임시로 1/3 가중치로 계산,
+            // 호출 측에서 store_recalc_all()을 한번 더 호출해 최종 보정.
+            x.total = x.kor + x.eng + x.math;
+            x.avg = (x.kor + x.eng + x.math) / 3.0;
+            x.grade = calc_grade_from_avg(x.avg);
+            if (s->count < MAX_STU) s->arr[s->count++] = x;
         }
-    fclose(fp); return 1;
+    }
+    fclose(fp);
+    return s->count;
+}
+
+int export_to_json(const StudentStore* s, const char* path) {
+    FILE* fp = fopen(path, "w");
+    if (!fp) { printf("JSON 저장 실패: %s\n", path); return -1; }
+    fprintf(fp, "[\n");
+    int wrote = 0;
+    for (int i = 0;i < s->count;i++) {
+        const Student* p = &s->arr[i];
+        fprintf(fp, "  {\"id\":%d,\"name\":\"%s\",\"kor\":%d,\"eng\":%d,\"math\":%d,"
+            "\"total\":%d,\"avg\":%.2f,\"grade\":\"%c\",\"deleted\":%d}%s\n",
+            p->id, p->name, p->kor, p->eng, p->math, p->total, p->avg, p->grade, p->deleted,
+            (i == s->count - 1) ? "" : ",");
+        wrote++;
+    }
+    fprintf(fp, "]\n");
+    fclose(fp);
+    return wrote;
+}
+
+int export_all_reports_txt(const StudentStore* s, const char* path) {
+    FILE* fp = fopen(path, "w");
+    if (!fp) { printf("TXT 저장 실패: %s\n", path); return -1; }
+    for (int i = 0;i < s->count;i++) {
+        const Student* p = &s->arr[i];
+        if (p->deleted) continue;
+        fprintf(fp, "==== 성적표 ====\n");
+        fprintf(fp, "학번: %d\n이름: %s\n", p->id, p->name);
+        fprintf(fp, "국어: %d, 영어: %d, 수학: %d\n", p->kor, p->eng, p->math);
+        fprintf(fp, "총점: %d, 평균: %.2f, 학점: %c\n\n", p->total, p->avg, p->grade);
+    }
+    fclose(fp);
+    return 0;
+}
+
+int merge_from_csv(StudentStore* s, const char* path, int mode) {
+    StudentStore tmp; store_init(&tmp);
+    if (load_from_csv(&tmp, path) <= 0) return -1;
+    store_recalc_all(&tmp);
+
+    if (mode == 0) {
+        // 덮어쓰기: 통째로 교체
+        *s = tmp;
+        return s->count;
+    }
+    // 병합: 같은 학번은 업데이트, 없으면 추가
+    int changed = 0;
+    for (int i = 0;i < tmp.count;i++) {
+        Student* p = &tmp.arr[i];
+        int idx = store_find_index_by_id(s, p->id);
+        if (idx < 0) { if (store_add(s, *p)) changed++; }
+        else {
+            s->arr[idx] = *p; changed++;
         }
+    }
+    return changed;
+}
