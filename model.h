@@ -1,102 +1,95 @@
+#pragma once
+// model.h : í•™ìƒ/ì„¤ì •/ì—°ì‚° ì •ì˜ì™€ ì„ ì–¸
+
 #ifndef MODEL_H
 #define MODEL_H
+
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include <stddef.h>
+    // ---------- ìƒìˆ˜ ----------
+#define NAME_LEN        32          // ì´ë¦„ ìµœëŒ€ ê¸¸ì´
+#define MAX_STU         1000        // ìµœëŒ€ í•™ìƒ ìˆ˜
 
-#define MAX_NAME_LEN 50
-#define MAX_SUBJECTS 5
-#define MIN_ID 1
-#define MAX_ID 999999999
-
-    /* ===== ÇĞ»ı ÇÑ ¸í ===== */
+// ---------- ìë£Œí˜• ----------
     typedef struct {
-        int   id;
-        char  name[MAX_NAME_LEN];
-        int   scores[MAX_SUBJECTS];
-        int   subject_count;
-        float average;   /* ÇöÀç ±ÔÄ¢(°¡ÁßÄ¡ Àû¿ë Æ÷ÇÔ)À¸·Î °è»êµÈ Æò±Õ */
-        int   rank;
+        int   id;                       // í•™ë²ˆ(ê³ ìœ í‚¤)
+        char  name[NAME_LEN];           // ì´ë¦„
+        int   kor, eng, math;           // ì ìˆ˜
+        int   total;                    // ì´ì (íŒŒìƒ)
+        double avg;                     // í‰ê· (íŒŒìƒ)
+        char  grade;                    // í•™ì (íŒŒìƒ)
+        int   deleted;                  // 1ì´ë©´ ì†Œí”„íŠ¸ ì‚­ì œ
     } Student;
 
-    /* ===== ÀúÀå¼Ò ===== */
     typedef struct {
-        Student* data;
-        size_t   size;
-        size_t   capacity;
+        // ê³¼ëª©ë³„ ê°€ì¤‘ì¹˜(í•©ì´ 1.0ì´ ë˜ë„ë¡ ì‚¬ìš©ìê°€ ì¡°ì •)
+        double w_kor;
+        double w_eng;
+        double w_math;
+    } GradeWeights;
+
+    typedef struct {
+        // í•©ê²© ì»·(í‰ê·  ê¸°ì¤€). ì˜ˆ: 60.0
+        double pass_cut;
+    } PassRule;
+
+    typedef struct {
+        Student arr[MAX_STU];           // ì €ì¥ì†Œ
+        int     count;                  // ì‚¬ìš© ì¤‘ì¸ ìŠ¬ë¡¯ ìˆ˜(ì‚­ì œ í¬í•¨)
+        GradeWeights weights;           // ê°€ì¤‘ì¹˜
+        PassRule     pass_rule;         // í•©ê²© ì»·
     } StudentStore;
 
-    /* ===== 7ÁÖÂ÷: Àü¿ª ¼³Á¤(°¡ÁßÄ¡/ÄÆ) ===== */
-    typedef struct {
-        float subject_weights[MAX_SUBJECTS];  /* ±âº» 1.0f */
-        float pass_threshold;                 /* ±âº» 60.0f */
-    } GradeConfig;
+    // ---------- ê¸°ë³¸ ìœ í‹¸ ----------
+    void store_init(StudentStore* s);
+    void store_recalc_one(Student* p, const GradeWeights* w);
+    void store_recalc_all(StudentStore* s);
 
-    /* ===== °ú¸ñº° Åë°è ===== */
-    typedef struct {
-        int   count;
-        int   min;
-        int   max;
-        float average;
-    } SubjectStats;
+    // ---------- CRUD ----------
+    int  store_find_index_by_id(const StudentStore* s, int id);
+    int  store_add(StudentStore* s, Student in);                   // ì„±ê³µ 1, ì‹¤íŒ¨ 0
+    int  store_edit_scores(StudentStore* s, int id, int kor, int eng, int math);
+    int  store_edit_name(StudentStore* s, int id, const char* name);
+    int  store_soft_delete(StudentStore* s, int id);               // ì‚­ì œ 1/ì‹¤íŒ¨ 0
+    int  store_restore(StudentStore* s, int id);                   // ë³µêµ¬ 1/ì‹¤íŒ¨ 0
 
-    /* ÀúÀå¼Ò ¼ö¸íÁÖ±â */
-    void  init_store(StudentStore* s);
-    void  free_store(StudentStore* s);
+    // ---------- ì¡°íšŒ/ê²€ìƒ‰ ----------
+    void store_list_active(const StudentStore* s);                 // ì½˜ì†” ì¶œë ¥
+    int  store_count_active(const StudentStore* s);
+    int  store_search_id(const StudentStore* s, int id, Student* out);            // ì°¾ìœ¼ë©´ 1
+    int  store_search_name_exact(const StudentStore* s, const char* name, Student* out_list, int cap);
+    int  store_search_name_partial_ci(const StudentStore* s, const char* key, Student* out_list, int cap);
 
-    /* 7ÁÖÂ÷: ¼³Á¤ ÃÊ±âÈ­ */
-    void  init_config(GradeConfig* cfg);
+    // ---------- í†µê³„ ----------
+    void store_subject_stats(const StudentStore* s, const char* label);
 
-    /* Æò±Õ/µî±Ş */
-    float compute_average(const int* scores, int subject_count);
-    float compute_weighted_average(const int* scores, int subject_count,
-        const float* weights);         /* 7ÁÖÂ÷ */
-    const char* grade_of_average(float avg);
-    const char* pass_label(float avg, float pass_threshold);       /* 7ÁÖÂ÷ */
+    // ---------- ì •ë ¬ ----------
+    typedef enum { SORT_BY_AVG = 0, SORT_BY_NAME = 1, SORT_BY_TOTAL = 2 } SortKey;
+    void store_sort(StudentStore* s, SortKey key, int ascending);
+    void store_sort_multi(StudentStore* s, SortKey key1, int asc1, SortKey key2, int asc2);
 
-    /* CRUD */
-    int   add_student(StudentStore* s, int id, const char* name,
-        const int* scores, int subject_count);
-    Student* find_student_by_id(StudentStore* s, int id);
-    Student* find_student_by_name(StudentStore* s, const char* name);
-    int   update_student(StudentStore* s, int id,
-        const int* new_scores, int subject_count);
-    int   update_student_name(StudentStore* s, int id, const char* new_name);
-    int   delete_student(StudentStore* s, int id);
+    // ---------- Top-N ----------
+    int  store_top_n(const StudentStore* s, int n, Student* out_list, int cap);
 
-    /* Á¤·Ä */
-    void  sort_by_average(StudentStore* s);
-    void  sort_by_name(StudentStore* s);
-    void  sort_by_average_then_name(StudentStore* s);
-    void  sort_by_name_then_id(StudentStore* s);
-    void  sort_by_id(StudentStore* s);
+    // ---------- ì„¤ì • ----------
+    void store_set_weights(StudentStore* s, double w_kor, double w_eng, double w_math);
+    void store_set_pass_cut(StudentStore* s, double cut);
 
-    /* ·©Å·/Åë°è */
-    void  recompute_ranks(StudentStore* s);
-    void  compute_subject_stats(const StudentStore* s,
-        SubjectStats out_stats[MAX_SUBJECTS]);
+    // ---------- í•™ì /í•©ê²© ----------
+    char calc_grade_from_avg(double avg);
+    int   is_pass(const Student* st, const PassRule* rule);
 
-    /* 5ÁÖÂ÷ °í±Ş °Ë»ö */
-    size_t find_students_by_name_substr_ci(
-        StudentStore* s, const char* needle,
-        Student** out_array, size_t max_out);
-
-    /* 6ÁÖÂ÷ ¸®Æ÷Æ®/¸ÓÁö */
-    void  print_student_pretty(const Student* st);
-    int   export_report_txt(const char* path, const StudentStore* store);
-    int   import_merge_csv(const char* path, StudentStore* store,
-        int overwrite_existing,
-        int* out_added, int* out_updated, int* out_skipped);
-
-    /* 7ÁÖÂ÷: °¡ÁßÄ¡¡¤ÄÆ Àû¿ë/JSON */
-    void  recompute_all_averages(StudentStore* s, const GradeConfig* cfg); /* Æò±Õ Àü¿ø Àç°è»ê */
-    int   export_json(const char* path, const StudentStore* store,
-        const GradeConfig* cfg);                              /* JSON ³»º¸³»±â */
+    // ---------- ë‹¨ì¼ ì¶œë ¥ ----------
+    void print_student_header(void);
+    void print_student_row(const Student* p);
+    void print_single_report_card(const Student* p, const PassRule* rule);
 
 #ifdef __cplusplus
 }
 #endif
-#endif
+
+#endif // MODEL_H
