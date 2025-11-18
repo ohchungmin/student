@@ -1,95 +1,85 @@
-#pragma once
-// model.h : 학생/설정/연산 정의와 선언
-
 #ifndef MODEL_H
 #define MODEL_H
 
-#include <stdio.h>
+#include <stddef.h>   /* size_t 사용을 위해 */
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+/* 학생 1명의 최대 이름 길이, 최대 과목 수 */
+#define MAX_NAME_LEN   50
+#define MAX_SUBJECTS   5
 
-    // ---------- 상수 ----------
-#define NAME_LEN        32          // 이름 최대 길이
-#define MAX_STU         1000        // 최대 학생 수
+/* 학번 범위(원하면 바꿔도 됨) */
+#define MIN_ID         1
+#define MAX_ID         999999999
 
-// ---------- 자료형 ----------
-    typedef struct {
-        int   id;                       // 학번(고유키)
-        char  name[NAME_LEN];           // 이름
-        int   kor, eng, math;           // 점수
-        int   total;                    // 총점(파생)
-        double avg;                     // 평균(파생)
-        char  grade;                    // 학점(파생)
-        int   deleted;                  // 1이면 소프트 삭제
-    } Student;
+/* 학생 1명을 나타내는 구조체 */
+typedef struct {
+    int   id;                            /* 학번 */
+    char  name[MAX_NAME_LEN];           /* 이름 (C 문자열) */
+    int   subject_count;                /* 이번 학생이 들은 과목 수 (1~5) */
+    int   scores[MAX_SUBJECTS];         /* 각 과목 점수 */
+    float average;                      /* 평균 점수 */
+    int   rank;                         /* 등수(1등, 2등, …) */
+} Student;
 
-    typedef struct {
-        // 과목별 가중치(합이 1.0이 되도록 사용자가 조정)
-        double w_kor;
-        double w_eng;
-        double w_math;
-    } GradeWeights;
+/* 학생들을 담는 “저장소” 구조체 */
+typedef struct {
+    Student* data;    /* 힙에 할당된 Student 배열의 시작 주소 */
+    size_t   size;    /* 현재 들어있는 학생 수 */
+    size_t   capacity;/* 배열이 담을 수 있는 최대 학생 수(칸 수) */
+} StudentStore;
 
-    typedef struct {
-        // 합격 컷(평균 기준). 예: 60.0
-        double pass_cut;
-    } PassRule;
+/* 과목별 통계를 담기 위한 구조체 */
+typedef struct {
+    int   count;      /* 이 과목을 수강한 학생 수 */
+    int   min;        /* 최소 점수 */
+    int   max;        /* 최대 점수 */
+    float average;    /* 평균 점수 */
+} SubjectStats;
 
-    typedef struct {
-        Student arr[MAX_STU];           // 저장소
-        int     count;                  // 사용 중인 슬롯 수(삭제 포함)
-        GradeWeights weights;           // 가중치
-        PassRule     pass_rule;         // 합격 컷
-    } StudentStore;
+/* === 저장소 관련 === */
+void init_store(StudentStore* s);
+void free_store(StudentStore* s);
 
-    // ---------- 기본 유틸 ----------
-    void store_init(StudentStore* s);
-    void store_recalc_one(Student* p, const GradeWeights* w);
-    void store_recalc_all(StudentStore* s);
+/* === 점수/평균/등급 === */
+float      compute_average(const int* scores, int subject_count);
+const char* grade_of_average(float avg);
 
-    // ---------- CRUD ----------
-    int  store_find_index_by_id(const StudentStore* s, int id);
-    int  store_add(StudentStore* s, Student in);                   // 성공 1, 실패 0
-    int  store_edit_scores(StudentStore* s, int id, int kor, int eng, int math);
-    int  store_edit_name(StudentStore* s, int id, const char* name);
-    int  store_soft_delete(StudentStore* s, int id);               // 삭제 1/실패 0
-    int  store_restore(StudentStore* s, int id);                   // 복구 1/실패 0
+/* === 학생 추가/조회/수정/삭제 === */
+int       add_student(StudentStore* s, int id, const char* name,
+    const int* scores, int subject_count);
+Student* find_student_by_id(StudentStore* s, int id);
+Student* find_student_by_name(StudentStore* s, const char* name);
+int       update_student(StudentStore* s, int id,
+    const int* new_scores, int subject_count);
+int       update_student_name(StudentStore* s, int id, const char* new_name);
+int       delete_student(StudentStore* s, int id);
 
-    // ---------- 조회/검색 ----------
-    void store_list_active(const StudentStore* s);                 // 콘솔 출력
-    int  store_count_active(const StudentStore* s);
-    int  store_search_id(const StudentStore* s, int id, Student* out);            // 찾으면 1
-    int  store_search_name_exact(const StudentStore* s, const char* name, Student* out_list, int cap);
-    int  store_search_name_partial_ci(const StudentStore* s, const char* key, Student* out_list, int cap);
+/* === 정렬 관련 === */
+void sort_by_average(StudentStore* s);
+void sort_by_name(StudentStore* s);
+void sort_by_average_then_name(StudentStore* s);
+void sort_by_name_then_id(StudentStore* s);
+void sort_by_id(StudentStore* s);
 
-    // ---------- 통계 ----------
-    void store_subject_stats(const StudentStore* s, const char* label);
+/* === 등수/통계 === */
+void  recompute_ranks(const StudentStore* s);
+void  compute_subject_stats(const StudentStore* s,
+    SubjectStats out_stats[MAX_SUBJECTS]);
 
-    // ---------- 정렬 ----------
-    typedef enum { SORT_BY_AVG = 0, SORT_BY_NAME = 1, SORT_BY_TOTAL = 2 } SortKey;
-    void store_sort(StudentStore* s, SortKey key, int ascending);
-    void store_sort_multi(StudentStore* s, SortKey key1, int asc1, SortKey key2, int asc2);
+/* === 이름 부분 문자열 검색(대소문자 무시) === */
+size_t find_students_by_name_substr_ci(StudentStore* s,
+    const char* needle,
+    Student** out_array, size_t max_out);
 
-    // ---------- Top-N ----------
-    int  store_top_n(const StudentStore* s, int n, Student* out_list, int cap);
+/* === 보기용 도우미 === */
+void print_student_pretty(const Student* st);
 
-    // ---------- 설정 ----------
-    void store_set_weights(StudentStore* s, double w_kor, double w_eng, double w_math);
-    void store_set_pass_cut(StudentStore* s, double cut);
+/* === 6주차 기능(텍스트 리포트, CSV 머지) === */
+int export_report_txt(const char* path, const StudentStore* store);
 
-    // ---------- 학점/합격 ----------
-    char calc_grade_from_avg(double avg);
-    int   is_pass(const Student* st, const PassRule* rule);
+int import_merge_csv(const char* path, StudentStore* store,
+    int overwrite_existing,
+    int* out_added, int* out_updated, int* out_skipped);
 
-    // ---------- 단일 출력 ----------
-    void print_student_header(void);
-    void print_student_row(const Student* p);
-    void print_single_report_card(const Student* p, const PassRule* rule);
+#endif /* MODEL_H */
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif // MODEL_H
