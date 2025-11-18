@@ -1,247 +1,483 @@
-// model.c : 학생 로직 구현
-#define _CRT_SECURE_NO_WARNINGS
-#include "model.h"
-#include <string.h>
-#include <ctype.h>
-#include <stdlib.h>
-#include <math.h>
+#include "model.h"                 /* Student, StudentStore 선언 */
+#include <stdlib.h>                /* malloc/realloc/free/exit */
+#include <string.h>                /* strcpy/strcmp 등 */
+#include <stdio.h>                 /* printf/fprintf */
 
-// ---------- 내부 비교 헬퍼 ----------
-static int cmp_name(const void* a, const void* b) {
-    const Student* x = (const Student*)a;
-    const Student* y = (const Student*)b;
-    return strcmp(x->name, y->name);
+#define _CRT_SECURE_NO_WARNINGS  /* MSVC의 fopen/scanf 경고 끄기 */
+#pragma warning(disable:4996)
+static void ensure_capacity(StudentStore* s, size_t need) {
+    if (s->capacity >= need) return;                 /* 이미 충분하면 아무것도 안 함 */
+
+    {
+        size_t newcap = (s->capacity == 0) ? 8 : s->capacity * 2;
+        while (newcap < need) newcap *= 2;
+
+        {
+            Student* p = (Student*)realloc(s->data, newcap * sizeof(Student));
+            if (!p) exit(EXIT_FAILURE);             /* 메모리 못 빌리면 그냥 종료 */
+            s->data = p;
+            s->capacity = newcap;
+        }
+    }
 }
-static int cmp_total(const void* a, const void* b) {
-    const Student* x = (const Student*)a;
-    const Student* y = (const Student*)b;
-    return (x->total - y->total);
+
+/* =========================================
+   저장소를 '빈 상자'로 준비
+   ========================================= */
+void init_store(StudentStore* s) {
+    s->data = NULL;
+    s->size = 0;
+    s->capacity = 0;
 }
-static int cmp_avg(const void* a, const void* b) {
-    const Student* x = (const Student*)a;
-    const Student* y = (const Student*)b;
-    if (x->avg < y->avg) return -1;
-    if (x->avg > y->avg) return  1;
+
+/* =========================================
+   저장소 정리(메모리 반납)
+   ========================================= */
+void free_store(StudentStore* s) {
+    free(s->data);
+    s->data = NULL;
+    s->size = 0;
+    s->capacity = 0;
+}
+
+/* =========================================
+   평균 계산기(합/과목수)
+   ========================================= */
+float compute_average(const int* scores, int subject_count) {
+    int i, sum;
+    if (subject_count <= 0) return 0.0f;
+    sum = 0;
+    for (i = 0; i < subject_count; ++i) sum += scores[i];
+    return (float)sum / (float)subject_count;
+}
+
+/* =========================================
+   평균으로 등급(A/B/C/D/F) 결정하기
+   ========================================= */
+const char* grade_of_average(float avg) {
+    if (avg >= 90.0f) return "A";
+    if (avg >= 80.0f) return "B";
+    if (avg >= 70.0f) return "C";
+    if (avg >= 60.0f) return "D";
+    return "F";
+}
+
+/* =========================================
+   [도우미] 이 학번이 이미 있는지 검사(있으면 1)
+   ========================================= */
+static int id_exists(StudentStore* s, int id) {
+    size_t i;
+    for (i = 0; i < s->size; ++i)
+        if (s->data[i].id == id) return 1;
     return 0;
 }
-static void tolower_inplace(char* s) {
-    for (; *s; ++s) *s = (char)tolower((unsigned char)*s);
-}
 
-// ---------- 기본 ----------
-void store_init(StudentStore* s) {
-    s->count = 0;
-    s->weights.w_kor = 1.0 / 3; s->weights.w_eng = 1.0 / 3; s->weights.w_math = 1.0 / 3;
-    s->pass_rule.pass_cut = 60.0;
-}
-char calc_grade_from_avg(double avg) {
-    if (avg >= 90) return 'A';
-    if (avg >= 80) return 'B';
-    if (avg >= 70) return 'C';
-    if (avg >= 60) return 'D';
-    return 'F';
-}
-void store_recalc_one(Student* p, const GradeWeights* w) {
-    // 가중 평균 = w_kor*kor + w_eng*eng + w_math*math
-    double weighted = p->kor * w->w_kor + p->eng * w->w_eng + p->math * w->w_math;
-    p->total = p->kor + p->eng + p->math;
-    p->avg = weighted * 1.0;     // 이미 가중치 합이 1.0이 되도록 설정
-    p->grade = calc_grade_from_avg(p->avg);
-}
-void store_recalc_all(StudentStore* s) {
-    for (int i = 0;i < s->count;i++) store_recalc_one(&s->arr[i], &s->weights);
-}
+/* =========================================
+   새 학생 추가(중복 학번이면 실패)
+   ========================================= */
+int add_student(StudentStore* s, int id, const char* name,
+    const int* scores, int subject_count) {
+    Student st;
+    int i;
 
-// ---------- CRUD ----------
-int store_find_index_by_id(const StudentStore* s, int id) {
-    for (int i = 0;i < s->count;i++) if (s->arr[i].id == id) return i;
-    return -1;
-}
-int store_add(StudentStore* s, Student in) {
-    if (s->count >= MAX_STU) return 0;
-    if (store_find_index_by_id(s, in.id) >= 0) return 0;
-    in.deleted = 0;
-    store_recalc_one(&in, &s->weights);
-    s->arr[s->count++] = in;
-    return 1;
-}
-int store_edit_scores(StudentStore* s, int id, int kor, int eng, int math) {
-    int idx = store_find_index_by_id(s, id);
-    if (idx < 0) return 0;
-    Student* p = &s->arr[idx];
-    if (p->deleted) return 0;
-    p->kor = kor; p->eng = eng; p->math = math;
-    store_recalc_one(p, &s->weights);
-    return 1;
-}
-int store_edit_name(StudentStore* s, int id, const char* name) {
-    int idx = store_find_index_by_id(s, id);
-    if (idx < 0) return 0;
-    Student* p = &s->arr[idx];
-    if (p->deleted) return 0;
-    strncpy(p->name, name, NAME_LEN - 1);
-    p->name[NAME_LEN - 1] = '\0';
-    return 1;
-}
-int store_soft_delete(StudentStore* s, int id) {
-    int idx = store_find_index_by_id(s, id);
-    if (idx < 0) return 0;
-    s->arr[idx].deleted = 1;
-    return 1;
-}
-int store_restore(StudentStore* s, int id) {
-    int idx = store_find_index_by_id(s, id);
-    if (idx < 0) return 0;
-    s->arr[idx].deleted = 0;
-    return 1;
-}
+    if (!name || !scores) return 0;
+    if (subject_count < 1 || subject_count > MAX_SUBJECTS) return 0;
+    if (id_exists(s, id)) return 0;
 
-// ---------- 조회/검색 ----------
-void print_student_header(void) {
-    printf("학번   이름            국어  영어  수학  총점  평균   학점  상태\n");
-    printf("---------------------------------------------------------------\n");
-}
-void print_student_row(const Student* p) {
-    printf("%-6d %-14s %4d  %4d  %4d  %4d  %6.2f   %c   %s\n",
-        p->id, p->name, p->kor, p->eng, p->math, p->total, p->avg, p->grade,
-        p->deleted ? "삭제" : "정상");
-}
-void store_list_active(const StudentStore* s) {
-    print_student_header();
-    int shown = 0;
-    for (int i = 0;i < s->count;i++) {
-        if (s->arr[i].deleted) continue;
-        print_student_row(&s->arr[i]); shown++;
-    }
-    if (!shown) puts("(표시할 학생 없음)");
-}
-int store_count_active(const StudentStore* s) {
-    int c = 0; for (int i = 0;i < s->count;i++) if (!s->arr[i].deleted) c++; return c;
-}
-int store_search_id(const StudentStore* s, int id, Student* out) {
-    int idx = store_find_index_by_id(s, id);
-    if (idx < 0 || s->arr[idx].deleted) return 0;
-    if (out) *out = s->arr[idx];
-    return 1;
-}
-int store_search_name_exact(const StudentStore* s, const char* name, Student* out_list, int cap) {
-    int n = 0;
-    for (int i = 0;i < s->count;i++) {
-        if (s->arr[i].deleted) continue;
-        if (strcmp(s->arr[i].name, name) == 0) {
-            if (out_list && n < cap) out_list[n] = s->arr[i];
-            n++;
-        }
-    }
-    return n;
-}
-int store_search_name_partial_ci(const StudentStore* s, const char* key, Student* out_list, int cap) {
-    char kbuf[NAME_LEN]; strncpy(kbuf, key, NAME_LEN - 1); kbuf[NAME_LEN - 1] = '\0'; tolower_inplace(kbuf);
-    int n = 0;
-    for (int i = 0;i < s->count;i++) {
-        if (s->arr[i].deleted) continue;
-        char nbuf[NAME_LEN]; strncpy(nbuf, s->arr[i].name, NAME_LEN - 1); nbuf[NAME_LEN - 1] = '\0'; tolower_inplace(nbuf);
-        if (strstr(nbuf, kbuf)) {
-            if (out_list && n < cap) out_list[n] = s->arr[i];
-            n++;
-        }
-    }
-    return n;
-}
+    ensure_capacity(s, s->size + 1);
 
-// ---------- 통계 ----------
-void store_subject_stats(const StudentStore* s, const char* label) {
-    int n = 0, maxK = -1, maxE = -1, maxM = -1, minK = 101, minE = 101, minM = 101;
-    long sumK = 0, sumE = 0, sumM = 0;
-    for (int i = 0;i < s->count;i++) {
-        const Student* p = &s->arr[i]; if (p->deleted) continue;
-        n++;
-        if (p->kor > maxK) maxK = p->kor; if (p->kor < minK) minK = p->kor; sumK += p->kor;
-        if (p->eng > maxE) maxE = p->eng; if (p->eng < minE) minE = p->eng; sumE += p->eng;
-        if (p->math > maxM) maxM = p->math; if (p->math < minM) minM = p->math; sumM += p->math;
-    }
-    printf("[%s] 표본=%d\n", label, n);
-    if (n == 0) { puts("데이터 없음."); return; }
-    printf("국어  평균 %.2f, 최댓값 %d, 최솟값 %d\n", sumK * 1.0 / n, maxK, minK);
-    printf("영어  평균 %.2f, 최댓값 %d, 최솟값 %d\n", sumE * 1.0 / n, maxE, minE);
-    printf("수학  평균 %.2f, 최댓값 %d, 최솟값 %d\n", sumM * 1.0 / n, maxM, minM);
-}
-
-// ---------- 정렬 ----------
-static void reverse(Student* a, int n) { for (int i = 0;i < n / 2;i++) { Student t = a[i]; a[i] = a[n - 1 - i]; a[n - 1 - i] = t; } }
-void store_sort(StudentStore* s, SortKey key, int ascending) {
-    // 삭제 포함 정렬 후에 그대로 유지. 출력 시에는 deleted 제외.
-    if (key == SORT_BY_NAME)       qsort(s->arr, s->count, sizeof(Student), cmp_name);
-    else if (key == SORT_BY_TOTAL) qsort(s->arr, s->count, sizeof(Student), cmp_total);
-    else                         qsort(s->arr, s->count, sizeof(Student), cmp_avg);
-    if (!ascending) reverse(s->arr, s->count);
-}
-static int cmp_multi(const void* A, const void* B, void* ctx) {
-    // ctx = int flags[3] : key1, asc1, key2, asc2
-    int* f = (int*)ctx;
-    const Student* x = (const Student*)A; const Student* y = (const Student*)B;
-    int k1 = f[0], a1 = f[1], k2 = f[2], a2 = f[3];
-    int r = 0;
-    if (k1 == SORT_BY_NAME) r = strcmp(x->name, y->name);
-    else if (k1 == SORT_BY_TOTAL) r = (x->total - y->total);
-    else { if (x->avg < y->avg) r = -1; else if (x->avg > y->avg) r = 1; else r = 0; }
-    if (!a1) r = -r;
-    if (r != 0) return r;
-    if (k2 == SORT_BY_NAME) r = strcmp(x->name, y->name);
-    else if (k2 == SORT_BY_TOTAL) r = (x->total - y->total);
-    else { if (x->avg < y->avg) r = -1; else if (x->avg > y->avg) r = 1; else r = 0; }
-    if (!a2) r = -r;
-    return r;
-}
-void store_sort_multi(StudentStore* s, SortKey key1, int asc1, SortKey key2, int asc2) {
-#if defined(_MSC_VER) && _MSC_VER < 1900
-    // MSVC 구버전에는 qsort_s 시그니처 차이. 단순 2단계 정렬로 대체.
-    store_sort(s, key2, asc2);
-    store_sort(s, key1, asc1);
+    st.id = id;
+#if defined(_MSC_VER)
+    strncpy_s(st.name, MAX_NAME_LEN, name, _TRUNCATE);
 #else
-    int flags[4] = { (int)key1, asc1, (int)key2, asc2 };
-    qsort_s(s->arr, s->count, sizeof(Student), cmp_multi, flags);
+    strncpy(st.name, name, MAX_NAME_LEN - 1);
+    st.name[MAX_NAME_LEN - 1] = '\0';
 #endif
+    st.subject_count = subject_count;
+
+    for (i = 0; i < subject_count; ++i) st.scores[i] = scores[i];
+    for (; i < MAX_SUBJECTS; ++i)       st.scores[i] = 0;
+
+    st.average = compute_average(st.scores, st.subject_count);
+    st.rank = 0;
+
+    s->data[s->size++] = st;
+    recompute_ranks(s);
+    return 1;
 }
 
-// ---------- Top-N ----------
-int store_top_n(const StudentStore* s, int n, Student* out_list, int cap) {
-    // 평균 기준 내림차순 Top-N
-    Student tmp[MAX_STU];
-    int m = 0;
-    for (int i = 0;i < s->count;i++) if (!s->arr[i].deleted) tmp[m++] = s->arr[i];
-    qsort(tmp, m, sizeof(Student), cmp_avg);
-    // cmp_avg는 오름차순. 뒤에서 n개를 꺼내거나 reverse.
-    for (int i = 0;i < m / 2;i++) { Student t = tmp[i]; tmp[i] = tmp[m - 1 - i]; tmp[m - 1 - i] = t; }
-    if (n > m) n = m;
-    for (int i = 0;i < n && i < cap;i++) out_list[i] = tmp[i];
-    return n;
+/* =========================================
+   학번으로 학생 찾기(없으면 NULL)
+   ========================================= */
+Student* find_student_by_id(StudentStore* s, int id) {
+    size_t i;
+    for (i = 0; i < s->size; ++i)
+        if (s->data[i].id == id) return &s->data[i];
+    return NULL;
 }
 
-// ---------- 설정 ----------
-void store_set_weights(StudentStore* s, double w_kor, double w_eng, double w_math) {
-    double sum = w_kor + w_eng + w_math;
-    if (sum <= 0) sum = 1.0;
-    s->weights.w_kor = w_kor / sum;
-    s->weights.w_eng = w_eng / sum;
-    s->weights.w_math = w_math / sum;
-    store_recalc_all(s);
-}
-void store_set_pass_cut(StudentStore* s, double cut) {
-    s->pass_rule.pass_cut = cut;
-}
-
-// ---------- 합격 ----------
-int is_pass(const Student* st, const PassRule* rule) {
-    return st->avg >= rule->pass_cut;
+/* =========================================
+   이름 '완전 일치'로 학생 찾기(첫 번째만)
+   ========================================= */
+Student* find_student_by_name(StudentStore* s, const char* name) {
+    size_t i;
+    if (!name) return NULL;
+    for (i = 0; i < s->size; ++i)
+        if (strcmp(s->data[i].name, name) == 0)
+            return &s->data[i];
+    return NULL;
 }
 
-// ---------- 단일 리포트 ----------
-void print_single_report_card(const Student* p, const PassRule* rule) {
-    puts("----------- 성적표 -----------");
-    printf("학번: %d\n이름: %s\n", p->id, p->name);
-    printf("국어: %d, 영어: %d, 수학: %d\n", p->kor, p->eng, p->math);
-    printf("총점: %d, 평균: %.2f, 학점: %c\n", p->total, p->avg, p->grade);
-    printf("합격 여부: %s (컷=%.1f)\n", is_pass(p, rule) ? "합격" : "불합격", rule->pass_cut);
-    puts("------------------------------");
+/* =========================================
+   점수 수정(평균 다시, 등수 다시)
+   ========================================= */
+int update_student(StudentStore* s, int id,
+    const int* new_scores, int subject_count) {
+    Student* st;
+    int i;
+
+    if (!new_scores) return 0;
+    if (subject_count < 1 || subject_count > MAX_SUBJECTS) return 0;
+
+    st = find_student_by_id(s, id);
+    if (!st) return 0;
+
+    st->subject_count = subject_count;
+    for (i = 0; i < subject_count; ++i) st->scores[i] = new_scores[i];
+    for (; i < MAX_SUBJECTS; ++i)       st->scores[i] = 0;
+
+    st->average = compute_average(st->scores, st->subject_count);
+    recompute_ranks(s);
+    return 1;
+}
+
+/* =========================================
+   5주차: 이름만 수정
+   ========================================= */
+int update_student_name(StudentStore* s, int id, const char* new_name) {
+    Student* st;
+    if (!new_name) return 0;
+
+    st = find_student_by_id(s, id);
+    if (!st) return 0;
+
+#if defined(_MSC_VER)
+    strncpy_s(st->name, MAX_NAME_LEN, new_name, _TRUNCATE);
+#else
+    strncpy(st->name, new_name, MAX_NAME_LEN - 1);
+    st->name[MAX_NAME_LEN - 1] = '\0';
+#endif
+    return 1;
+}
+
+/* =========================================
+   학생 삭제(뒤의 것들을 한 칸씩 당겨 채우기)
+   ========================================= */
+int delete_student(StudentStore* s, int id) {
+    size_t i, j;
+
+    for (i = 0; i < s->size; ++i) {
+        if (s->data[i].id == id) {
+            for (j = i; j + 1 < s->size; ++j)
+                s->data[j] = s->data[j + 1];
+            s->size--;
+            recompute_ranks(s);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* =========================================
+   정렬 비교기들
+   ========================================= */
+static int cmp_avg_desc(const void* a, const void* b) {
+    const Student* sa = (const Student*)a;
+    const Student* sb = (const Student*)b;
+    if (sa->average < sb->average) return 1;
+    if (sa->average > sb->average) return -1;
+    return 0;
+}
+static int cmp_name_asc(const void* a, const void* b) {
+    const Student* sa = (const Student*)a;
+    const Student* sb = (const Student*)b;
+    return strcmp(sa->name, sb->name);
+}
+static int cmp_id_asc(const void* a, const void* b) {
+    const Student* sa = (const Student*)a;
+    const Student* sb = (const Student*)b;
+    if (sa->id < sb->id) return -1;
+    if (sa->id > sb->id) return 1;
+    return 0;
+}
+static int cmp_avg_desc_then_name_asc(const void* a, const void* b) {
+    int first = cmp_avg_desc(a, b);
+    if (first != 0) return first;
+    return cmp_name_asc(a, b);
+}
+static int cmp_name_asc_then_id_asc(const void* a, const void* b) {
+    int first = cmp_name_asc(a, b);
+    if (first != 0) return first;
+    return cmp_id_asc(a, b);
+}
+
+/* =========================================
+   정렬 함수들
+   ========================================= */
+void sort_by_average(StudentStore* s) {
+    if (s->size > 1)
+        qsort(s->data, s->size, sizeof(Student), cmp_avg_desc);
+}
+void sort_by_name(StudentStore* s) {
+    if (s->size > 1)
+        qsort(s->data, s->size, sizeof(Student), cmp_name_asc);
+}
+void sort_by_average_then_name(StudentStore* s) {
+    if (s->size > 1)
+        qsort(s->data, s->size, sizeof(Student), cmp_avg_desc_then_name_asc);
+}
+void sort_by_name_then_id(StudentStore* s) {
+    if (s->size > 1)
+        qsort(s->data, s->size, sizeof(Student), cmp_name_asc_then_id_asc);
+}
+void sort_by_id(StudentStore* s) {
+    if (s->size > 1)
+        qsort(s->data, s->size, sizeof(Student), cmp_id_asc);
+}
+
+/* =========================================
+   등수 다시 계산(나보다 평균 높은 사람 수 + 1)
+   ========================================= */
+void recompute_ranks(const StudentStore* s) {
+    size_t i, j;
+    for (i = 0; i < s->size; ++i) {
+        int rank = 1;
+        for (j = 0; j < s->size; ++j)
+            if (s->data[j].average > s->data[i].average)
+                rank++;
+        s->data[i].rank = rank;
+    }
+}
+
+/* =========================================
+   과목별 통계(각 과목의 count/min/max/avg)
+   ========================================= */
+void compute_subject_stats(const StudentStore* s,
+    SubjectStats out_stats[MAX_SUBJECTS]) {
+    size_t i;
+    int k;
+
+    for (k = 0; k < MAX_SUBJECTS; ++k) {
+        out_stats[k].count = 0;
+        out_stats[k].min = 0;
+        out_stats[k].max = 0;
+        out_stats[k].average = 0.0f;
+    }
+
+    for (k = 0; k < MAX_SUBJECTS; ++k) {
+        int sum = 0, minv = 0, maxv = 0, first = 1;
+
+        for (i = 0; i < s->size; ++i) {
+            if (s->data[i].subject_count > k) {
+                int sc = s->data[i].scores[k];
+
+                if (first) {
+                    minv = maxv = sc;
+                    first = 0;
+                }
+                else {
+                    if (sc < minv) minv = sc;
+                    if (sc > maxv) maxv = sc;
+                }
+                sum += sc;
+                out_stats[k].count++;
+            }
+        }
+
+        if (out_stats[k].count > 0) {
+            out_stats[k].min = minv;
+            out_stats[k].max = maxv;
+            out_stats[k].average = (float)sum / out_stats[k].count;
+        }
+    }
+}
+
+/* =========================================
+   부분 문자열 검색(대소문자 무시) 도우미들
+   ========================================= */
+static char tolower_c(char c) {
+    if (c >= 'A' && c <= 'Z') return (char)(c - 'A' + 'a');
+    return c;
+}
+
+static int contains_substr_ci(const char* hay, const char* nee) {
+    const char* p;
+    size_t i;
+
+    if (!hay || !nee) return 0;
+    if (*nee == '\0') return 1;
+
+    for (p = hay; *p != '\0'; ++p) {
+        for (i = 0;; ++i) {
+            char hc = tolower_c(p[i]);
+            char nc = tolower_c(nee[i]);
+            if (nee[i] == '\0') return 1;
+            if (p[i] == '\0') return 0;
+            if (hc != nc) break;
+        }
+    }
+    return 0;
+}
+
+/* needle 이 들어있는 학생들을 찾아 포인터 배열로 반환 */
+size_t find_students_by_name_substr_ci(StudentStore* s,
+    const char* needle,
+    Student** out_array, size_t max_out) {
+    size_t i, out = 0;
+    if (!needle || !out_array || max_out == 0) return 0;
+
+    for (i = 0; i < s->size; ++i) {
+        if (contains_substr_ci(s->data[i].name, needle)) {
+            if (out < max_out) {
+                out_array[out] = &s->data[i];
+                ++out;
+            }
+            else break;
+        }
+    }
+    return out;
+}
+
+/* =========================================
+   학생 1명 성적표 예쁘게 출력
+   ========================================= */
+void print_student_pretty(const Student* st) {
+    size_t i;
+    if (!st) { printf("(학생 없음)\n"); return; }
+
+    printf("\n==== 학생 성적표 ====\n");
+    printf("학번: %d\n", st->id);
+    printf("이름: %s\n", st->name);
+    printf("과목 수: %d\n", st->subject_count);
+
+    printf("점수: ");
+    for (i = 0; i < (size_t)st->subject_count; ++i)
+        printf("%d ", st->scores[i]);
+
+    printf("\n평균: %.2f\n", st->average);
+    printf("등급: %s\n", grade_of_average(st->average));
+    printf("등수: %d\n", st->rank);
+    printf("=====================\n");
+}
+
+/* =========================================
+   전체 리포트를 TXT 파일로 내보내기
+   ========================================= */
+int export_report_txt(const char* path, const StudentStore* store) {
+    FILE* fp;
+    size_t i, j;
+
+    if (!path || !store) return 0;
+
+    fp = fopen(path, "w");
+    if (!fp) {
+        printf("파일 열기 실패: %s\n", path);
+        return 0;
+    }
+
+    fprintf(fp, "==== 학생 전체 리포트 ====\n");
+    fprintf(fp, "총 인원: %u명\n\n", (unsigned)store->size);
+
+    fprintf(fp, "ID\t이름\t과목수\t점수들\t\t평균\t등급\t등수\n");
+    for (i = 0; i < store->size; ++i) {
+        const Student* st = &store->data[i];
+
+        fprintf(fp, "%d\t%s\t%d\t", st->id, st->name, st->subject_count);
+        for (j = 0; j < (size_t)st->subject_count; ++j)
+            fprintf(fp, "%d ", st->scores[j]);
+        if (st->subject_count < MAX_SUBJECTS) fprintf(fp, "\t");
+
+        fprintf(fp, "\t%.2f\t%s\t%d\n",
+            st->average, grade_of_average(st->average), st->rank);
+    }
+
+    fclose(fp);
+    return 1;
+}
+
+/* =========================================
+   CSV "머지" 불러오기
+   ========================================= */
+int import_merge_csv(const char* path, StudentStore* store,
+    int overwrite_existing,
+    int* out_added, int* out_updated, int* out_skipped) {
+    FILE* fp;
+    char line[512];
+
+    int added = 0;
+    int updated = 0;
+    int skipped = 0;
+
+    if (!path || !store) return 0;
+
+    fp = fopen(path, "r");
+    if (!fp) {
+        printf("파일 열기 실패: %s\n", path);
+        return 0;
+    }
+
+    /* 헤더 한 줄 버리기 */
+    if (!fgets(line, sizeof(line), fp)) {
+        fclose(fp);
+        return 0;
+    }
+
+    while (fgets(line, sizeof(line), fp)) {
+        int id, sc1, sc2, sc3, sc4, sc5;
+        int subject_count, rank_dummy;
+        char  name[MAX_NAME_LEN];
+        float avg_dummy;
+        int ok = sscanf(line,
+            "%d,%49[^,],%d,%d,%d,%d,%d,%d,%f,%d",
+            &id, name, &subject_count,
+            &sc1, &sc2, &sc3, &sc4, &sc5,
+            &avg_dummy, &rank_dummy);
+
+        if (ok == 10) {
+            int scores[MAX_SUBJECTS];
+            Student* exist;
+
+            scores[0] = sc1;
+            scores[1] = sc2;
+            scores[2] = sc3;
+            scores[3] = sc4;
+            scores[4] = sc5;
+
+            exist = find_student_by_id(store, id);
+
+            if (!exist) {
+                if (add_student(store, id, name, scores, subject_count))
+                    added++;
+            }
+            else {
+                if (overwrite_existing) {
+                    update_student_name(store, id, name);
+                    update_student(store, id, scores, subject_count);
+                    updated++;
+                }
+                else {
+                    skipped++;
+                }
+            }
+        }
+        /* 포맷이 잘못된 줄은 무시 */
+    }
+
+    fclose(fp);
+
+    if (out_added)   *out_added = added;
+    if (out_updated) *out_updated = updated;
+    if (out_skipped) *out_skipped = skipped;
+
+    return 1;
 }
