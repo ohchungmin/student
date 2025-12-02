@@ -668,7 +668,7 @@ int main(void) {
 
     while (running) {
         print_menu();
-        int cmd = prompt_int("메뉴 선택: ", 0, 23);
+        int cmd = prompt_int("메뉴 선택: ", 0, 25);
 
         switch (cmd) {
         case 0: running = 0; break;
@@ -706,4 +706,5 @@ int main(void) {
     puts("프로그램 종료.");
     return EXIT_SUCCESS;
 }
+
 
