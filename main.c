@@ -45,6 +45,10 @@ static void print_menu(void) {
     puts("21) 성적 분포(구간별 인원 수) 보기 (9주차)");
     puts("22) 성적 편차 분석 (10주차)");
     puts("23) 성적 위험군 탐지 (10주차)");
+    puts("24) 점수 범위 검색 (11주차)");
+    puts("25) 자동 분석 요약 (12주차)");
+
+
     puts("0) 종료");
 }
 
@@ -542,6 +546,118 @@ static void action_risk_student(const StudentStore* store) {
     printf("\n총 %d명이 위험군입니다.\n", count);
 }
 
+/* ---------------- 24) 점수 범위 검색 ---------------- */
+static void action_search_score_range(const StudentStore* store) {
+    if (store->size == 0) {
+        puts("등록된 학생이 없습니다.");
+        return;
+    }
+
+    int subject = prompt_int("과목 번호(1~5): ", 1, 5);
+    int minv = prompt_int("최소 점수: ", 0, 100);
+    int maxv = prompt_int("최대 점수: ", 0, 100);
+
+    if (minv > maxv) {
+        int tmp = minv;
+        minv = maxv;
+        maxv = tmp;
+    }
+
+    printf("\n[점수 범위 검색] 과목 %d, %d ~ %d점\n",
+        subject, minv, maxv);
+
+    puts("ID\t이름\t점수\t평균\t등급\t등수");
+
+    int found = 0;
+
+    for (size_t i = 0; i < store->size; ++i) {
+        const Student* st = &store->data[i];
+
+        /* st->subject_count 로 유효성 체크 */
+        if (subject > st->subject_count) continue;
+
+        int sc = st->scores[subject - 1];
+
+        if (sc >= minv && sc <= maxv) {
+            found++;
+            printf("%d\t%s\t%d\t%.2f\t%s\t%d\n",
+                st->id, st->name, sc,
+                st->average,
+                grade_of_average(st->average),
+                st->rank);
+        }
+    }
+
+    printf("\n총 %d명 발견\n", found);
+}
+
+/* ---------------- 25) 자동 분석 요약 ---------------- */
+
+static void action_auto_analysis(const StudentStore* store) {
+    if (store->size == 0) {
+        puts("학생이 없습니다.");
+        return;
+    }
+
+    float sum = 0;
+    float max_avg = -1.0f;
+    float min_avg = 999.0f;
+
+    const Student* max_st = NULL;
+    const Student* min_st = NULL;
+
+    int bins[5] = { 0 };  // 성적대별 인원수
+
+    for (size_t i = 0; i < store->size; ++i) {
+        float a = store->data[i].average;
+        sum += a;
+
+        if (a > max_avg) {
+            max_avg = a;
+            max_st = &store->data[i];
+        }
+        if (a < min_avg) {
+            min_avg = a;
+            min_st = &store->data[i];
+        }
+
+        if (a < 60) bins[0]++;        // 0~59
+        else if (a < 70) bins[1]++;   // 60~69
+        else if (a < 80) bins[2]++;   // 70~79
+        else if (a < 90) bins[3]++;   // 80~89
+        else bins[4]++;               // 90~100
+    }
+
+    float overall = sum / store->size;
+
+    printf("\n====== 자동 분석 요약 ======\n");
+    printf("전체 학생 수: %zu명\n", store->size);
+    printf("전체 평균: %.2f점\n\n", overall);
+
+    puts("[점수 구간별 인원]");
+    printf("0~59  : %d명\n", bins[0]);
+    printf("60~69 : %d명\n", bins[1]);
+    printf("70~79 : %d명\n", bins[2]);
+    printf("80~89 : %d명\n", bins[3]);
+    printf("90~100: %d명\n\n", bins[4]);
+
+    puts("[최고 점수]");
+    printf("%d번 %s (%.2f점)\n\n",
+        max_st->id, max_st->name, max_st->average);
+
+    puts("[최저 점수]");
+    printf("%d번 %s (%.2f점)\n\n",
+        min_st->id, min_st->name, min_st->average);
+
+    puts("[요약]");
+    if (overall >= 80) puts("전체적으로 성적이 우수한 편입니다.");
+    else if (overall >= 70) puts("전체 평균은 무난한 수준입니다.");
+    else puts("전체적으로 학습 관리가 필요한 편입니다.");
+
+    puts("===========================\n");
+}
+
+
 /* ========================= main ========================= */
 
 int main(void) {
@@ -579,6 +695,8 @@ int main(void) {
         case 21: action_score_distribution(&store); break;
         case 22: action_deviation_analysis(&store); break;
         case 23: action_risk_student(&store); break;
+        case 24: action_search_score_range(&store); break;
+        case 25: action_auto_analysis(&store); break;
 
         default: puts("잘못된 선택."); break;
         }
@@ -588,3 +706,4 @@ int main(void) {
     puts("프로그램 종료.");
     return EXIT_SUCCESS;
 }
+
