@@ -47,6 +47,7 @@ static void print_menu(void) {
     puts("23) 성적 위험군 탐지 (10주차)");
     puts("24) 점수 범위 검색 (11주차)");
     puts("25) 자동 분석 요약 (12주차)");
+    puts("26) 성적 그래프 출력 (12주차)");
 
 
     puts("0) 종료");
@@ -657,6 +658,48 @@ static void action_auto_analysis(const StudentStore* store) {
     puts("===========================\n");
 }
 
+/* ---------------- 26) 성적 그래프 출력 ---------------- */
+/* 성적 구간을 막대그래프로 출력하는 간단한 ASCII 시각화 */
+
+static void action_score_graph(const StudentStore* store) {
+    if (store->size == 0) {
+        puts("학생이 없습니다.");
+        return;
+    }
+
+    int bins[5] = { 0 };
+
+    /* 학생들의 평균 점수를 구간별로 집계 */
+    for (size_t i = 0; i < store->size; ++i) {
+        float a = store->data[i].average;
+
+        if (a < 60) bins[0]++;        // 0~59
+        else if (a < 70) bins[1]++;   // 60~69
+        else if (a < 80) bins[2]++;   // 70~79
+        else if (a < 90) bins[3]++;   // 80~89
+        else bins[4]++;               // 90~100
+    }
+
+    puts("\n====== 평균 성적 그래프 (ASCII) ======");
+    puts("■ = 학생 1명\n");
+
+    const char* labels[5] = {
+        "0~59  ",
+        "60~69 ",
+        "70~79 ",
+        "80~89 ",
+        "90~100"
+    };
+
+    for (int i = 0; i < 5; ++i) {
+        printf("%s | ", labels[i]);
+        for (int j = 0; j < bins[i]; ++j)
+            putchar('#');
+        printf(" (%d명)\n", bins[i]);
+    }
+
+    puts("=====================================\n");
+}
 
 /* ========================= main ========================= */
 
@@ -668,7 +711,7 @@ int main(void) {
 
     while (running) {
         print_menu();
-        int cmd = prompt_int("메뉴 선택: ", 0, 25);
+        int cmd = prompt_int("메뉴 선택: ", 0, 26);
 
         switch (cmd) {
         case 0: running = 0; break;
@@ -697,6 +740,7 @@ int main(void) {
         case 23: action_risk_student(&store); break;
         case 24: action_search_score_range(&store); break;
         case 25: action_auto_analysis(&store); break;
+        case 26: action_score_graph(&store); break;
 
         default: puts("잘못된 선택."); break;
         }
@@ -706,5 +750,4 @@ int main(void) {
     puts("프로그램 종료.");
     return EXIT_SUCCESS;
 }
-
 
